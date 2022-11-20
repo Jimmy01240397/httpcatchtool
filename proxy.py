@@ -1,6 +1,8 @@
 import re
 import requests
 import os.path
+import os
+import sys
 
 import threading
 import time
@@ -31,6 +33,11 @@ def proxy(url, request):
     headers = dict(headers)
     print("Got %s response from %s with headers: %s\n" % (r.status_code, url, headers))
     print("%s\n\n" % (r.content))
+
+    os.makedirs(os.path.dirname("./download/" + url), exist_ok=True)
+    with open("./download/" + url, 'wb') as f:
+        f.write(r.content)
+
     out = Response(r.content, r.status_code, headers)
     return out
 
@@ -45,4 +52,5 @@ def make_request(url, method, headers={}, data=None):
 
 
 if __name__ == "__main__":
-    app.run(port=87)
+
+    app.run(host="0.0.0.0", port=443, ssl_context=('server.crt', 'server.key'))
