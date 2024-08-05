@@ -1,56 +1,85 @@
-import re
-import requests
-import os.path
-import os
+import socket
 import sys
+import ssl
+import io
+import dpkt.http
 
-import threading
-import time
+buffer_size = 65535
 
-from flask import Flask,request,redirect,Response
-
-app = Flask(__name__)
-
-print("aaa")
-
-
-@app.route('/',methods=['GET','POST','DELETE'])
-def host():
-    return proxy("", request)
-
-@app.route('/<path:path>',methods=['GET','POST','DELETE'])
-def hostpath(path):
-    return proxy(path, request)
+if len(sys.argv) <= 1:
+    print(f"usage: {sys.argv[0]} <port> <ssl> <cert> <key>")
+    exit()
 
 
-def proxy(url, request):
-    print("\n%s %s with headers: %s" % (request.method, url, request.headers))
-    inheaders = dict(request.headers)
-    hostfor = inheaders['Host']
-    r = make_request(f"https://{hostfor}/{url}", request.method, dict(inheaders), request.form)
-    excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-    headers = [(name, value) for (name, value) in r.raw.headers.items() if name.lower() not in excluded_headers]
-    headers = dict(headers)
-    print("Got %s response from %s with headers: %s\n" % (r.status_code, url, headers))
-    print("%s\n\n" % (r.content))
+def readhttp(conn):
+    conn.settimeout(1)
+    data = conn.recv(8192)
+    if len(data) == 0:
+        raise Exception()
+    buf = io.BytesIO(data)
+    buf.readline()
+    header = dpkt.http.parse_headers(buf)
+    if 'content-length' in header:
+        contentlen = int(header['content-length'])
+        nowlen = len(buf.read())
+        buf = io.BytesIO()
+        buf.write(data)
+        while contentlen - nowlen != 0:
+            nowdata = conn.recv(contentlen - nowlen)
+            tmplen = len(nowdata)
+            if tmplen == 0:
+                raise Exception()
+            buf.write(nowdata)
+            nowlen += tmplen
+        data = buf.getvalue()
+    conn.settimeout(None)
+    try:
+        print(data.decode())
+        pass
+    except:
+        print(data)
+        pass
+    return data
 
-    os.makedirs(os.path.dirname("./download/" + url), exist_ok=True)
-    with open("./download/" + url, 'wb') as f:
-        f.write(r.content)
+port = int(sys.argv[1])
+usessl = len(sys.argv) > 2 and sys.argv[2] == 'true'
 
-    out = Response(r.content, r.status_code, headers)
-    return out
+lis = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+lis.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+if usessl:
+    cert = sys.argv[3]
+    key = sys.argv[4]
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    lis = context.wrap_socket(lis, server_side=True)
+lis.bind(('', port))
+lis.listen(0)
 
-def make_request(url, method, headers={}, data=None):
-    # Fetch the URL, and stream it back
-    if method == 'POST':
-        if headers['Content-Type'] == 'application/json':
-            print("Sending %s %s with headers: %s and data %s\n" % (method, url, headers, request.get_data()))
-            return requests.request(method, url, params=request.args, stream=True, headers=headers, allow_redirects=False, json=json.loads(request.get_data()))
-    print("Sending %s %s with headers: %s and data %s\n" % (method, url, headers, data))
-    return requests.request(method, url, params=request.args, stream=True, headers=headers, allow_redirects=False, data=data)
+while True:
+    try:
+        with lis.accept()[0] as conn:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                init = False
+                while True:
+                    data = readhttp(conn)
 
+                    if not init:
+                        req = dpkt.http.Request()
+                        req.unpack(data)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        if usessl:
+                            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                            context.check_hostname = False
+                            context.verify_mode = ssl.CERT_NONE
+                            sock = context.wrap_socket(sock, server_hostname=req.headers['host'])
+                        sock.connect((req.headers['host'], port))
+                        init = True
+                    sock.send(data)
+                    data = readhttp(sock)
+                    conn.send(data)
+    except KeyboardInterrupt:
+        exit()
+    except Exception as e:
+        print(e)
+        pass
 
-if __name__ == "__main__":
-
-    app.run(host="0.0.0.0", port=443, ssl_context=('server.crt', 'server.key'))
