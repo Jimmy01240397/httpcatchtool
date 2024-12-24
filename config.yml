@@ -1,0 +1,18 @@
+port: 80
+usessl: false
+cert: ""
+key: ""
+
+route:
+  default:
+
+#  <HOSTNAME>:
+#    mode: return
+#    content: a
+#  
+#  <HOSTNAME>:
+#    mode: proxy
+#    ssl: false
+#    host: example.com
+#    port: 80
+
