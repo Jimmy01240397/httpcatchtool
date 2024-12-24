@@ -2,6 +2,18 @@
 
 A tool to listen http and dump.
 
+## Init
+
+```bash
+bash init.sh
+```
+
+## Run
+
+```bash
+bash run.sh config.yml 
+```
+
 ## Return mode
 
 Set config.yml like
